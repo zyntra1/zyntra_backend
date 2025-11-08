@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     SUPER_ADMIN_EMAIL: str
     SUPER_ADMIN_PASSWORD: str
     
+    # Gait Recognition
+    GAIT_MODEL_PATH: str = "models/gaitbase_model.pt"
+    STORAGE_PATH: str = "storage"
+    
+    # Azure Blob Storage
+    AZURE_STORAGE_CONNECTION_STRING: str
+    AZURE_STORAGE_CONTAINER_NAME: str = "gait-videos"
+    
     @property
     def cors_origins(self) -> List[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]

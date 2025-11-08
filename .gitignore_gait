@@ -1,0 +1,13 @@
+# Add these entries to your .gitignore file
+
+# Gait Recognition System - Ignore these directories
+storage/
+models/*.pt
+models/*.pth
+*.mp4
+*.avi
+*.mov
+
+# Keep directory structure but ignore contents
+!storage/.gitkeep
+!models/.gitkeep
