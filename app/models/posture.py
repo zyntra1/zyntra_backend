@@ -202,3 +202,55 @@ class PostureBaseline(Base):
     
     def __repr__(self):
         return f"<PostureBaseline(user_id={self.user_id}, complete={self.is_complete})>"
+
+
+class WellnessForest(Base):
+    """
+    Virtual forest representation of user wellness
+    Visualizes wellness scores through nature metaphors
+    """
+    __tablename__ = "wellness_forests"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    
+    # Forest metrics (based on wellness score)
+    total_trees = Column(Integer, default=0, nullable=False)  # 0-100 trees
+    healthy_trees = Column(Integer, default=0, nullable=False)  # Green trees
+    growing_trees = Column(Integer, default=0, nullable=False)  # Yellow trees
+    wilting_trees = Column(Integer, default=0, nullable=False)  # Orange trees
+    dead_trees = Column(Integer, default=0, nullable=False)  # Brown/dead trees
+    
+    # Forest health indicators
+    forest_health_score = Column(Float, default=0.0, nullable=False)  # 0-100
+    biodiversity_score = Column(Float, default=0.0, nullable=False)  # Based on activity variety
+    growth_rate = Column(Float, default=0.0, nullable=False)  # Weekly change
+    
+    # Environmental factors (wellness-related)
+    sunlight_level = Column(Float, default=50.0, nullable=False)  # Mood/engagement (0-100)
+    water_level = Column(Float, default=50.0, nullable=False)  # Break compliance (0-100)
+    soil_quality = Column(Float, default=50.0, nullable=False)  # Ergonomic score (0-100)
+    air_quality = Column(Float, default=50.0, nullable=False)  # Stress level inverse (0-100)
+    
+    # Special features unlocked by good wellness
+    has_flowers = Column(Boolean, default=False)  # Unlocked at 80+ wellness
+    has_birds = Column(Boolean, default=False)  # Unlocked at 70+ wellness
+    has_butterflies = Column(Boolean, default=False)  # Unlocked at 60+ wellness
+    has_stream = Column(Boolean, default=False)  # Unlocked at good break compliance
+    has_rocks = Column(Boolean, default=False)  # Always present
+    has_bench = Column(Boolean, default=False)  # Unlocked at low stress
+    
+    # Visual theme
+    season = Column(String(20), default="spring")  # spring, summer, autumn, winter
+    time_of_day = Column(String(20), default="day")  # dawn, day, dusk, night
+    weather = Column(String(20), default="clear")  # clear, cloudy, rainy, sunny
+    
+    # Metadata
+    last_updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="wellness_forest")
+    
+    def __repr__(self):
+        return f"<WellnessForest(user_id={self.user_id}, trees={self.total_trees}, health={self.forest_health_score})>"

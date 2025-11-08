@@ -10,19 +10,25 @@ from datetime import datetime, timedelta
 
 from app.core.database import get_db
 from app.models.user import User, Admin
-from app.models.posture import WellnessMetrics, AttritionRisk, PostureBaseline
+from app.models.posture import WellnessMetrics, AttritionRisk, PostureBaseline, WellnessForest
 from app.schemas.posture import (
     WellnessMetricsResponse,
     AttritionRiskResponse,
     WellnessDashboardResponse,
     AdminWellnessDashboard,
-    UserWellnessListItem
+    UserWellnessListItem,
+    WellnessForestResponse,
+    AdminForestOverview
 )
 from app.utils.dependencies import get_current_user, get_current_admin
+from app.services.forest_calculator import ForestCalculator
 
 # Separate routers for user and admin
 user_router = APIRouter(prefix="/wellness", tags=["Wellness - User"])
 admin_router = APIRouter(prefix="/wellness", tags=["Wellness - Admin"])
+
+# Initialize forest calculator
+forest_calculator = ForestCalculator()
 
 
 @user_router.get("/dashboard", response_model=WellnessDashboardResponse)
@@ -267,20 +273,281 @@ async def get_user_wellness_by_admin(
             detail="User not found or not under your management"
         )
     
-    # Reuse user dashboard logic
-    # (Simplified - in production, extract to shared function)
+    # Get today's metrics
+    today = datetime.utcnow().date()
+    today_metrics = db.query(WellnessMetrics).filter(
+        WellnessMetrics.user_id == user.id,
+        func.date(WellnessMetrics.date) == today
+    ).first()
+    
+    # Get last 7 days metrics
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    metrics_7d = db.query(WellnessMetrics).filter(
+        WellnessMetrics.user_id == user.id,
+        WellnessMetrics.date >= seven_days_ago
+    ).order_by(WellnessMetrics.date).all()
+    
+    # Get last 30 days metrics
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    metrics_30d = db.query(WellnessMetrics).filter(
+        WellnessMetrics.user_id == user.id,
+        WellnessMetrics.date >= thirty_days_ago
+    ).all()
+    
+    # Calculate averages
+    avg_wellness_7d = sum(m.ergonomic_score for m in metrics_7d) / len(metrics_7d) if metrics_7d else 50
+    avg_wellness_30d = sum(m.ergonomic_score for m in metrics_30d) / len(metrics_30d) if metrics_30d else 50
+    
+    # Calculate change percentage
+    if len(metrics_30d) >= 14:
+        first_week = metrics_30d[:7]
+        last_week = metrics_30d[-7:]
+        first_avg = sum(m.ergonomic_score for m in first_week) / len(first_week)
+        last_avg = sum(m.ergonomic_score for m in last_week) / len(last_week)
+        wellness_change = ((last_avg - first_avg) / first_avg) * 100
+    else:
+        wellness_change = 0
+    
+    # Get current attrition risk
+    current_risk = db.query(AttritionRisk).filter(
+        AttritionRisk.user_id == user.id
+    ).order_by(desc(AttritionRisk.prediction_date)).first()
+    
+    # Generate recommendations
+    recommendations = []
+    if today_metrics:
+        if today_metrics.ergonomic_score < 50:
+            recommendations.append("Consider adjusting workstation for better ergonomics")
+        if today_metrics.stress_level in ['high', 'very_high']:
+            recommendations.append("Take regular breaks to manage stress levels")
+        if today_metrics.break_compliance_score and today_metrics.break_compliance_score < 50:
+            recommendations.append("Remember to take breaks every hour")
+    else:
+        recommendations.append("No data available for today - ensure monitoring is active")
+    
+    # Determine posture trend
+    if len(metrics_7d) >= 3:
+        recent_scores = [m.posture_quality_score for m in metrics_7d[-3:]]
+        earlier_scores = [m.posture_quality_score for m in metrics_7d[:3]]
+        if sum(recent_scores) > sum(earlier_scores):
+            posture_trend = "improving"
+        elif sum(recent_scores) < sum(earlier_scores):
+            posture_trend = "declining"
+        else:
+            posture_trend = "stable"
+    else:
+        posture_trend = "stable"
+    
+    # Top posture issues
+    top_issues = []
+    if today_metrics:
+        if today_metrics.forward_head_percent and today_metrics.forward_head_percent > 30:
+            top_issues.append("Forward head posture")
+        if today_metrics.slouched_percent and today_metrics.slouched_percent > 30:
+            top_issues.append("Slouching")
+        if today_metrics.neck_pain_risk and today_metrics.neck_pain_risk > 0.6:
+            top_issues.append("Neck pain risk")
+    
     return WellnessDashboardResponse(
         user_id=user.id,
         username=user.username,
-        today_ergonomic_score=None,
-        today_stress_level=None,
-        today_mood=None,
-        wellness_trend_7d=[],
-        avg_wellness_7d=0,
-        avg_wellness_30d=0,
-        wellness_change_percent=0,
-        current_risk=None,
-        recommendations=[],
-        posture_quality_trend="stable",
-        top_posture_issues=[]
+        today_ergonomic_score=today_metrics.ergonomic_score if today_metrics else None,
+        today_stress_level=today_metrics.stress_level if today_metrics else None,
+        today_mood=today_metrics.mood_estimate if today_metrics else None,
+        wellness_trend_7d=[WellnessMetricsResponse.from_orm(m) for m in metrics_7d],
+        avg_wellness_7d=round(avg_wellness_7d, 2),
+        avg_wellness_30d=round(avg_wellness_30d, 2),
+        wellness_change_percent=round(wellness_change, 2),
+        current_risk=AttritionRiskResponse.from_orm(current_risk) if current_risk else None,
+        recommendations=recommendations,
+        posture_quality_trend=posture_trend,
+        top_posture_issues=top_issues
     )
+
+
+# ============================================
+# WELLNESS FOREST ENDPOINTS
+# ============================================
+
+@user_router.get("/forest", response_model=WellnessForestResponse)
+async def get_my_forest(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get user's wellness forest visualization
+    Virtual forest representation of wellness metrics
+    """
+    # Calculate and get forest
+    forest = forest_calculator.get_forest(db, current_user.id)
+    
+    return WellnessForestResponse(
+        user_id=forest.user_id,
+        username=current_user.username,
+        total_trees=forest.total_trees,
+        healthy_trees=forest.healthy_trees,
+        growing_trees=forest.growing_trees,
+        wilting_trees=forest.wilting_trees,
+        dead_trees=forest.dead_trees,
+        forest_health_score=forest.forest_health_score,
+        biodiversity_score=forest.biodiversity_score,
+        growth_rate=forest.growth_rate,
+        sunlight_level=forest.sunlight_level,
+        water_level=forest.water_level,
+        soil_quality=forest.soil_quality,
+        air_quality=forest.air_quality,
+        has_flowers=forest.has_flowers,
+        has_birds=forest.has_birds,
+        has_butterflies=forest.has_butterflies,
+        has_stream=forest.has_stream,
+        has_rocks=forest.has_rocks,
+        has_bench=forest.has_bench,
+        season=forest.season,
+        time_of_day=forest.time_of_day,
+        weather=forest.weather,
+        last_updated=forest.last_updated
+    )
+
+
+@admin_router.get("/forests", response_model=AdminForestOverview)
+async def get_all_forests(
+    current_admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all employee forests overview (admin)
+    """
+    # Get all users under this admin
+    users = db.query(User).filter(User.admin_id == current_admin.id).all()
+    
+    if not users:
+        return AdminForestOverview(
+            total_employees=0,
+            avg_forest_health=0.0,
+            healthiest_forest=None,
+            most_improved_forest=None,
+            needs_attention=[],
+            forests=[],
+            last_updated=datetime.utcnow()
+        )
+    
+    # Get/calculate forests for all users
+    forests_data = []
+    total_health = 0.0
+    healthiest_score = 0.0
+    healthiest_user = None
+    most_growth = -1000.0
+    most_growth_user = None
+    needs_attention = []
+    
+    for user in users:
+        forest = forest_calculator.get_forest(db, user.id)
+        
+        forest_response = WellnessForestResponse(
+            user_id=forest.user_id,
+            username=user.username,
+            total_trees=forest.total_trees,
+            healthy_trees=forest.healthy_trees,
+            growing_trees=forest.growing_trees,
+            wilting_trees=forest.wilting_trees,
+            dead_trees=forest.dead_trees,
+            forest_health_score=forest.forest_health_score,
+            biodiversity_score=forest.biodiversity_score,
+            growth_rate=forest.growth_rate,
+            sunlight_level=forest.sunlight_level,
+            water_level=forest.water_level,
+            soil_quality=forest.soil_quality,
+            air_quality=forest.air_quality,
+            has_flowers=forest.has_flowers,
+            has_birds=forest.has_birds,
+            has_butterflies=forest.has_butterflies,
+            has_stream=forest.has_stream,
+            has_rocks=forest.has_rocks,
+            has_bench=forest.has_bench,
+            season=forest.season,
+            time_of_day=forest.time_of_day,
+            weather=forest.weather,
+            last_updated=forest.last_updated
+        )
+        
+        forests_data.append(forest_response)
+        total_health += forest.forest_health_score
+        
+        # Track healthiest
+        if forest.forest_health_score > healthiest_score:
+            healthiest_score = forest.forest_health_score
+            healthiest_user = user.username
+        
+        # Track most improved
+        if forest.growth_rate > most_growth:
+            most_growth = forest.growth_rate
+            most_growth_user = user.username
+        
+        # Track needs attention
+        if forest.forest_health_score < 40:
+            needs_attention.append(user.username)
+    
+    avg_health = total_health / len(users) if users else 0.0
+    
+    return AdminForestOverview(
+        total_employees=len(users),
+        avg_forest_health=round(avg_health, 2),
+        healthiest_forest=healthiest_user,
+        most_improved_forest=most_growth_user if most_growth > 0 else None,
+        needs_attention=needs_attention,
+        forests=forests_data,
+        last_updated=datetime.utcnow()
+    )
+
+
+@admin_router.get("/forest/{user_id}", response_model=WellnessForestResponse)
+async def get_user_forest_by_admin(
+    user_id: int,
+    current_admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get specific user's forest (admin access)
+    """
+    # Verify user belongs to this admin
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.admin_id == current_admin.id
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found or not under your management"
+        )
+    
+    # Calculate and get forest
+    forest = forest_calculator.get_forest(db, user.id)
+    
+    return WellnessForestResponse(
+        user_id=forest.user_id,
+        username=user.username,
+        total_trees=forest.total_trees,
+        healthy_trees=forest.healthy_trees,
+        growing_trees=forest.growing_trees,
+        wilting_trees=forest.wilting_trees,
+        dead_trees=forest.dead_trees,
+        forest_health_score=forest.forest_health_score,
+        biodiversity_score=forest.biodiversity_score,
+        growth_rate=forest.growth_rate,
+        sunlight_level=forest.sunlight_level,
+        water_level=forest.water_level,
+        soil_quality=forest.soil_quality,
+        air_quality=forest.air_quality,
+        has_flowers=forest.has_flowers,
+        has_birds=forest.has_birds,
+        has_butterflies=forest.has_butterflies,
+        has_stream=forest.has_stream,
+        has_rocks=forest.has_rocks,
+        has_bench=forest.has_bench,
+        season=forest.season,
+        time_of_day=forest.time_of_day,
+        weather=forest.weather,
+        last_updated=forest.last_updated
+    )
+

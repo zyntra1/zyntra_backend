@@ -263,3 +263,58 @@ class PostureBaselineResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# Wellness Forest Schemas
+class WellnessForestResponse(BaseModel):
+    """Virtual forest visualization of wellness"""
+    user_id: int
+    username: str
+    
+    # Tree counts
+    total_trees: int
+    healthy_trees: int
+    growing_trees: int
+    wilting_trees: int
+    dead_trees: int
+    
+    # Overall forest health
+    forest_health_score: float
+    biodiversity_score: float
+    growth_rate: float
+    
+    # Environmental factors
+    sunlight_level: float  # Mood/engagement
+    water_level: float  # Break compliance
+    soil_quality: float  # Ergonomic score
+    air_quality: float  # Stress level (inverse)
+    
+    # Special features
+    has_flowers: bool
+    has_birds: bool
+    has_butterflies: bool
+    has_stream: bool
+    has_rocks: bool
+    has_bench: bool
+    
+    # Visual theme
+    season: str
+    time_of_day: str
+    weather: str
+    
+    last_updated: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class AdminForestOverview(BaseModel):
+    """Overview of all employee forests for admin"""
+    total_employees: int
+    avg_forest_health: float
+    healthiest_forest: Optional[str]  # username
+    most_improved_forest: Optional[str]  # username
+    needs_attention: List[str]  # usernames with forest_health < 40
+    
+    forests: List[WellnessForestResponse]
+    last_updated: datetime
