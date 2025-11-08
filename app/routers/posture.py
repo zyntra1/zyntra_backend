@@ -66,7 +66,7 @@ async def analyze_cctv_demo(
         print(f"Starting posture analysis for: {file.filename}")
         analysis_result = posture_analyzer.analyze_video(
             video_path=temp_video_path,
-            fps_sample=1,  # Sample every 1 second
+            fps_sample=None,  # Process all frames
             max_persons=5
         )
         
@@ -182,6 +182,8 @@ async def analyze_cctv_demo(
     
     except Exception as e:
         print(f"Error analyzing CCTV video: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error analyzing video: {str(e)}"
@@ -191,9 +193,6 @@ async def analyze_cctv_demo(
         # Clean up temporary file
         if os.path.exists(temp_video_path):
             os.remove(temp_video_path)
-        
-        # Clean up analyzer resources
-        posture_analyzer.close()
 
 
 @router.get("/health")
