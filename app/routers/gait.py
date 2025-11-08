@@ -30,10 +30,8 @@ user_router = APIRouter(prefix="/gait", tags=["Gait Recognition - User"])
 admin_router = APIRouter(prefix="/gait", tags=["Gait Recognition - Admin"])
 
 # Initialize gait processor
-# Model path will be configured in settings
-gait_processor = GaitProcessor(
-    model_path=getattr(settings, 'GAIT_MODEL_PATH', 'models/gaitbase_model.pt')
-)
+# Model paths configured in settings, downloaded on startup
+gait_processor = GaitProcessor(model_path=settings.GAIT_MODEL_PATH)
 
 
 @user_router.post("/upload-user-video", response_model=VideoUploadResponse)

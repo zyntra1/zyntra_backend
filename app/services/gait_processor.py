@@ -13,6 +13,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from ultralytics import YOLO
 import json
 
+# Hardcoded YOLO model path
+YOLO_MODEL_PATH = "yolov8n.pt"
+
 
 class GaitProcessor:
     """
@@ -31,7 +34,7 @@ class GaitProcessor:
         print(f"Using device: {self.device}")
         
         # Initialize YOLO for person detection
-        self.yolo_model = YOLO('yolov8n.pt')  # Will auto-download on first run
+        self.yolo_model = YOLO(YOLO_MODEL_PATH)
         
         # OpenGait model will be loaded when model file is available
         self.gait_model = None
