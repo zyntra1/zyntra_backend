@@ -40,5 +40,11 @@ class User(Base):
     # Relationship with admin
     admin = relationship("Admin", back_populates="employees")
     
+    # Posture and wellness relationships
+    posture_snapshots = relationship("PostureSnapshot", back_populates="user", cascade="all, delete-orphan")
+    wellness_metrics = relationship("WellnessMetrics", back_populates="user", cascade="all, delete-orphan")
+    attrition_risks = relationship("AttritionRisk", back_populates="user", cascade="all, delete-orphan")
+    posture_baseline = relationship("PostureBaseline", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username}, email={self.email}, admin_id={self.admin_id})>"

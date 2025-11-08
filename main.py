@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.routers import auth_router, admins_router, users_router, gait_user_router, gait_admin_router
+from app.routers.posture import router as posture_router
+from app.routers.wellness import user_router as wellness_user_router, admin_router as wellness_admin_router
 from app.utils.model_downloader import ensure_models_exist
 
 # Create database tables
@@ -52,6 +54,9 @@ app.include_router(admins_router)
 app.include_router(users_router)
 app.include_router(gait_user_router)
 app.include_router(gait_admin_router)
+app.include_router(posture_router)  # Posture detection (admin)
+app.include_router(wellness_user_router)  # User wellness dashboard
+app.include_router(wellness_admin_router)  # Admin wellness dashboard
 
 
 @app.get("/")

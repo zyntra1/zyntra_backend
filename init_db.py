@@ -5,6 +5,7 @@ Run this to create all database tables.
 
 from app.core.database import engine, Base
 from app.models import Admin, User
+from app.models.posture import PostureSnapshot, WellnessMetrics, AttritionRisk, PostureBaseline
 from app.utils import get_password_hash
 from app.core.config import settings
 from sqlalchemy.orm import Session
