@@ -275,6 +275,7 @@ class GaitProcessor:
                               detections: List[Dict], recognition_results: List[Dict]):
         """
         Create annotated video with bounding boxes and recognition labels
+        Smart label positioning to avoid overlaps
         
         Args:
             input_video_path: Original video path
@@ -300,34 +301,42 @@ class GaitProcessor:
             if not ret:
                 break
             
-            # Draw bounding boxes for all detections in this frame
+            # Collect all detections for current frame
+            frame_detections = []
             for det_idx, detection in enumerate(detections):
                 for bbox in detection['boxes']:
                     if bbox['frame'] == frame_idx:
-                        x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
-                        
-                        # Get recognition result for this detection
                         result = recognition_results[det_idx] if det_idx < len(recognition_results) else None
-                        
-                        # Choose color based on recognition status
-                        if result and result.get('is_recognized'):
-                            color = (0, 255, 0)  # Green for recognized
-                            label = f"{result.get('username', 'Unknown')} ({result.get('confidence', 0):.2f})"
-                        else:
-                            color = (0, 0, 255)  # Red for unknown
-                            label = "Unknown"
-                        
-                        # Draw bounding box
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                        
-                        # Draw label background
-                        label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                        cv2.rectangle(frame, (x1, y1 - label_size[1] - 10), 
-                                    (x1 + label_size[0], y1), color, -1)
-                        
-                        # Draw label text
-                        cv2.putText(frame, label, (x1, y1 - 5),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                        frame_detections.append({
+                            'bbox': bbox,
+                            'result': result,
+                            'det_idx': det_idx
+                        })
+            
+            # Calculate optimal label positions to avoid overlap
+            label_positions = self._calculate_label_positions(frame_detections, width, height)
+            
+            # Draw all bounding boxes and labels
+            for i, det_info in enumerate(frame_detections):
+                bbox = det_info['bbox']
+                result = det_info['result']
+                x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
+                
+                # Choose color based on recognition status
+                if result and result.get('is_recognized'):
+                    color = (0, 255, 0)  # Green for recognized
+                    label = f"{result.get('username', 'Unknown')} ({result.get('confidence', 0):.2f})"
+                else:
+                    color = (0, 0, 255)  # Red for unknown
+                    label = "Unknown"
+                
+                # Draw bounding box with thicker line
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                
+                # Get calculated label position
+                label_pos = label_positions[i]
+                self._draw_label(frame, label, label_pos['x'], label_pos['y'], 
+                               color, label_pos['position'])
             
             out.write(frame)
             frame_idx += 1
@@ -336,6 +345,214 @@ class GaitProcessor:
         out.release()
         
         print(f"Annotated video saved to {output_video_path}")
+    
+    def _calculate_label_positions(self, detections: List[Dict], frame_width: int, 
+                                   frame_height: int) -> List[Dict]:
+        """
+        Calculate optimal label positions to avoid overlaps
+        Alternates between top and bottom positions for nearby boxes
+        
+        Args:
+            detections: List of detection info for current frame
+            frame_width: Video frame width
+            frame_height: Video frame height
+            
+        Returns:
+            List of label position dictionaries
+        """
+        if not detections:
+            return []
+        
+        # Font settings
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.45
+        font_thickness = 1
+        padding = 6
+        margin = 10  # Space between label and box
+        
+        # Sort detections by x position (left to right) for consistent labeling
+        sorted_indices = sorted(range(len(detections)), 
+                               key=lambda i: int(detections[i]['bbox']['x1']))
+        
+        positions = []
+        occupied_regions = []
+        
+        for idx, i in enumerate(sorted_indices):
+            det_info = detections[i]
+            bbox = det_info['bbox']
+            result = det_info['result']
+            x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
+            box_center_x = (x1 + x2) // 2
+            
+            # Create label text
+            if result and result.get('is_recognized'):
+                label = f"{result.get('username', 'Unknown')} ({result.get('confidence', 0):.2f})"
+            else:
+                label = "Unknown"
+            
+            # Calculate label size
+            (label_width, label_height), baseline = cv2.getTextSize(
+                label, font, font_scale, font_thickness
+            )
+            total_label_height = label_height + baseline + padding * 2
+            total_label_width = label_width + padding * 2
+            
+            # Alternate between top and bottom for adjacent boxes
+            use_top = (idx % 2 == 0)
+            
+            best_position = None
+            min_overlap_area = float('inf')
+            
+            # Try multiple positions with priority
+            positions_to_try = []
+            
+            if use_top:
+                # Top positions (preferred for even indices)
+                positions_to_try = [
+                    ('top', x1, y1 - total_label_height - margin),
+                    ('top_center', box_center_x - total_label_width // 2, y1 - total_label_height - margin),
+                    ('top_right', x2 - total_label_width, y1 - total_label_height - margin),
+                    ('top_far', x1, y1 - total_label_height - margin * 3),
+                    ('bottom', x1, y2 + margin),
+                    ('bottom_center', box_center_x - total_label_width // 2, y2 + margin),
+                ]
+            else:
+                # Bottom positions (preferred for odd indices)
+                positions_to_try = [
+                    ('bottom', x1, y2 + margin),
+                    ('bottom_center', box_center_x - total_label_width // 2, y2 + margin),
+                    ('bottom_right', x2 - total_label_width, y2 + margin),
+                    ('bottom_far', x1, y2 + margin * 3),
+                    ('top', x1, y1 - total_label_height - margin),
+                    ('top_center', box_center_x - total_label_width // 2, y1 - total_label_height - margin),
+                ]
+            
+            # Try each position and find one with minimum overlap
+            for pos_name, try_x, try_y in positions_to_try:
+                # Ensure within frame bounds
+                try_x = max(5, min(try_x, frame_width - total_label_width - 5))
+                try_y = max(total_label_height + 5, min(try_y, frame_height - 10))
+                
+                # Calculate overlap with existing labels
+                overlap_area = 0
+                has_overlap = False
+                
+                for occupied in occupied_regions:
+                    if self._regions_overlap(
+                        try_x, try_y, total_label_width, total_label_height,
+                        occupied['x'], occupied['y'], occupied['width'], occupied['height']
+                    ):
+                        has_overlap = True
+                        # Calculate overlap area for comparison
+                        overlap_area += self._calculate_overlap_area(
+                            try_x, try_y, total_label_width, total_label_height,
+                            occupied['x'], occupied['y'], occupied['width'], occupied['height']
+                        )
+                
+                # If no overlap, use this position immediately
+                if not has_overlap:
+                    best_position = (pos_name, try_x, try_y)
+                    break
+                
+                # Otherwise, track minimum overlap
+                if overlap_area < min_overlap_area:
+                    min_overlap_area = overlap_area
+                    best_position = (pos_name, try_x, try_y)
+            
+            # If all positions have overlap, use the one with minimum overlap
+            if best_position is None:
+                # Fallback to top-left with offset
+                pos_name = 'fallback'
+                final_x = x1 + (idx * 15) % 50
+                final_y = max(total_label_height + 5, y1 - total_label_height - margin)
+                best_position = (pos_name, final_x, final_y)
+            
+            pos_name, final_x, final_y = best_position
+            
+            # Record this position as occupied
+            occupied_regions.append({
+                'x': final_x,
+                'y': final_y,
+                'width': total_label_width,
+                'height': total_label_height
+            })
+            
+            positions.append({
+                'x': final_x,
+                'y': final_y + total_label_height - padding,
+                'position': pos_name,
+                'width': total_label_width,
+                'height': total_label_height
+            })
+        
+        # Reorder positions to match original detection order
+        final_positions = [None] * len(detections)
+        for idx, sorted_idx in enumerate(sorted_indices):
+            final_positions[sorted_idx] = positions[idx]
+        
+        return final_positions
+    
+    def _regions_overlap(self, x1: int, y1: int, w1: int, h1: int,
+                        x2: int, y2: int, w2: int, h2: int) -> bool:
+        """Check if two rectangular regions overlap"""
+        return not (x1 + w1 < x2 or x2 + w2 < x1 or y1 + h1 < y2 or y2 + h2 < y1)
+    
+    def _calculate_overlap_area(self, x1: int, y1: int, w1: int, h1: int,
+                               x2: int, y2: int, w2: int, h2: int) -> int:
+        """Calculate the area of overlap between two rectangles"""
+        # Calculate intersection rectangle
+        x_left = max(x1, x2)
+        y_top = max(y1, y2)
+        x_right = min(x1 + w1, x2 + w2)
+        y_bottom = min(y1 + h1, y2 + h2)
+        
+        # If no overlap, return 0
+        if x_right < x_left or y_bottom < y_top:
+            return 0
+        
+        # Return overlap area
+        return (x_right - x_left) * (y_bottom - y_top)
+    
+    def _draw_label(self, frame: np.ndarray, text: str, x: int, y: int, 
+                   color: Tuple[int, int, int], position: str):
+        """
+        Draw label with background and text
+        Enhanced readability with better contrast
+        
+        Args:
+            frame: Video frame
+            text: Label text
+            x, y: Label position (baseline position)
+            color: Box color
+            position: Position type for styling
+        """
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.45
+        font_thickness = 1
+        padding = 6
+        
+        # Calculate text size
+        (text_width, text_height), baseline = cv2.getTextSize(
+            text, font, font_scale, font_thickness
+        )
+        
+        # Background rectangle coordinates
+        bg_x1 = x - padding
+        bg_y1 = y - text_height - padding
+        bg_x2 = x + text_width + padding
+        bg_y2 = y + baseline + padding
+        
+        # Draw solid background with slight transparency
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (bg_x1, bg_y1), (bg_x2, bg_y2), color, -1)
+        cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
+        
+        # Draw border around label for better separation
+        cv2.rectangle(frame, (bg_x1, bg_y1), (bg_x2, bg_y2), color, 1)
+        
+        # Draw text in white with anti-aliasing for maximum readability
+        cv2.putText(frame, text, (x, y),
+                   font, font_scale, (255, 255, 255), font_thickness, cv2.LINE_AA)
 
 
 def serialize_embedding(embedding: np.ndarray) -> bytes:
