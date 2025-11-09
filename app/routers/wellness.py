@@ -131,14 +131,28 @@ async def get_user_wellness_dashboard(
 
 @admin_router.get("/dashboard", response_model=AdminWellnessDashboard)
 async def get_admin_wellness_dashboard(
+    user_id: Optional[int] = None,
+    username: Optional[str] = None,
     current_admin: Admin = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
     """
     Get aggregated wellness dashboard for all employees under this admin
+    
+    Optional filters:
+    - user_id: Filter by specific employee ID
+    - username: Filter by specific employee username
     """
-    # Get all users under this admin
-    users = db.query(User).filter(User.admin_id == current_admin.id).all()
+    # Build query for users under this admin
+    query = db.query(User).filter(User.admin_id == current_admin.id)
+    
+    # Apply filters if provided
+    if user_id:
+        query = query.filter(User.id == user_id)
+    if username:
+        query = query.filter(User.username.ilike(f"%{username}%"))
+    
+    users = query.all()
     
     if not users:
         return AdminWellnessDashboard(
