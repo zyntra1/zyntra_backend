@@ -18,10 +18,12 @@ from app.schemas.posture import (
     AdminWellnessDashboard,
     UserWellnessListItem,
     WellnessForestResponse,
-    AdminForestOverview
+    AdminForestOverview,
+    AIInsightsResponse
 )
 from app.utils.dependencies import get_current_user, get_current_admin
 from app.services.forest_calculator import ForestCalculator
+from app.services.ai_insights import ai_insights_generator
 
 # Separate routers for user and admin
 user_router = APIRouter(prefix="/wellness", tags=["Wellness - User"])
@@ -126,6 +128,70 @@ async def get_user_wellness_dashboard(
         recommendations=recommendations,
         posture_quality_trend=posture_trend,
         top_posture_issues=top_issues
+    )
+
+
+@user_router.get("/ai-insights", response_model=AIInsightsResponse)
+async def get_ai_wellness_insights(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get AI-generated wellness insights for current user
+    
+    Returns 8 personalized insights based on the user's wellness data
+    from the last 30 days, powered by Google Gemini AI.
+    """
+    # Get last 30 days metrics
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    metrics = db.query(WellnessMetrics).filter(
+        WellnessMetrics.user_id == current_user.id,
+        WellnessMetrics.date >= thirty_days_ago
+    ).order_by(WellnessMetrics.date).all()
+    
+    # Get latest attrition risk
+    latest_risk = db.query(AttritionRisk).filter(
+        AttritionRisk.user_id == current_user.id
+    ).order_by(desc(AttritionRisk.prediction_date)).first()
+    
+    # Generate AI insights
+    insights = ai_insights_generator.generate_wellness_insights(
+        user_name=current_user.username,
+        recent_metrics=metrics,
+        latest_risk=latest_risk
+    )
+    
+    # Calculate summary stats
+    if metrics:
+        avg_wellness = sum(m.ergonomic_score for m in metrics) / len(metrics)
+        
+        # Determine trend
+        if len(metrics) >= 14:
+            first_week = metrics[:7]
+            last_week = metrics[-7:]
+            first_avg = sum(m.ergonomic_score for m in first_week) / len(first_week)
+            last_avg = sum(m.ergonomic_score for m in last_week) / len(last_week)
+            
+            if last_avg > first_avg + 5:
+                trend = "improving"
+            elif last_avg < first_avg - 5:
+                trend = "declining"
+            else:
+                trend = "stable"
+        else:
+            trend = "stable"
+    else:
+        avg_wellness = 50.0
+        trend = "insufficient_data"
+    
+    return AIInsightsResponse(
+        user_id=current_user.id,
+        username=current_user.username,
+        insights=insights,
+        generated_at=datetime.utcnow(),
+        data_period_days=len(metrics),
+        avg_wellness_score=round(avg_wellness, 2),
+        wellness_trend=trend
     )
 
 

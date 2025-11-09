@@ -318,3 +318,19 @@ class AdminForestOverview(BaseModel):
     
     forests: List[WellnessForestResponse]
     last_updated: datetime
+
+
+# AI Insights Schemas
+class AIInsightsResponse(BaseModel):
+    """AI-generated wellness insights for user"""
+    user_id: int
+    username: str
+    insights: List[str] = Field(..., min_length=8, max_length=8, description="8 personalized wellness insights")
+    generated_at: datetime
+    data_period_days: int
+    avg_wellness_score: float
+    wellness_trend: str
+    
+    class Config:
+        from_attributes = True
+

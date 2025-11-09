@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     AZURE_STORAGE_CONNECTION_STRING: str
     AZURE_STORAGE_CONTAINER_NAME: str = "gait-videos"
     
+    # Gemini AI
+    GEMINI_API_KEY: str
+    
     @property
     def cors_origins(self) -> List[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
